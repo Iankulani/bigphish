@@ -1,0 +1,89 @@
+# Multi-stage build for BIG-PHISH
+FROM alpine:3.19 AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    python3-dev \
+    py3-pip \
+    py3-setuptools \
+    py3-wheel \
+    gcc \
+    musl-dev \
+    linux-headers \
+    libffi-dev \
+    openssl-dev \
+    cargo \
+    build-base \
+    nmap \
+    nikto \
+    curl \
+    wget \
+    git \
+    tcpdump \
+    net-tools \
+    iputils \
+    traceroute \
+    bind-tools \
+    iptables \
+    chromium \
+    chromium-chromedriver
+
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements*.txt ./
+RUN pip3 install --no-cache-dir -r requirements-full.txt
+
+# Copy application
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/.bigphish /app/reports /app/logs && \
+    chmod +x /app/entrypoint.sh
+
+# Final stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    python3 \
+    nmap \
+    nikto \
+    curl \
+    tcpdump \
+    net-tools \
+    iputils \
+    traceroute \
+    bind-tools \
+    iptables \
+    chromium \
+    chromium-chromedriver \
+    sudo
+
+# Create non-root user
+RUN addgroup -g 1000 bigphish && \
+    adduser -D -u 1000 -G bigphish bigphish && \
+    echo "bigphish ALL=(ALL) NOPASSWD: /sbin/iptables" >> /etc/sudoers
+
+# Copy installed packages from builder
+COPY --from=builder /usr/lib/python3.11/site-packages /usr/lib/python3.11/site-packages
+COPY --from=builder /usr/bin /usr/bin
+COPY --from=builder /app /app
+
+WORKDIR /app
+
+# Set ownership
+RUN chown -R bigphish:bigphish /app
+
+# Switch to non-root user
+USER bigphish
+
+# Expose ports
+EXPOSE 8080 8081 9090 5000 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python3 /app/healthcheck.py
+
+# Entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]

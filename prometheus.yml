@@ -1,0 +1,33 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'bigphish'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+      scheme: http
+      timeout: 10s
+      api_version: v2
+
+rule_files:
+  - "alerts.yml"
+
+scrape_configs:
+  - job_name: 'bigphish'
+    static_configs:
+      - targets: ['localhost:5000']
+    metrics_path: '/api/metrics'
+    scrape_interval: 5s
+    
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+    scrape_interval: 15s
+    
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 15s

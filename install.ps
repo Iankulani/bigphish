@@ -1,0 +1,159 @@
+#!/usr/bin/env pwsh
+# BIG-PHISH PowerShell Installation Script for Windows
+
+param(
+    [switch]$NoAdmin,
+    [switch]$Quiet
+)
+
+$ErrorActionPreference = "Stop"
+$script:ColorGreen = "`e[32m"
+$script:ColorRed = "`e[31m"
+$script:ColorYellow = "`e[33m"
+$script:ColorBlue = "`e[34m"
+$script:ColorReset = "`e[0m"
+
+function Write-ColorOutput {
+    param([string]$Color, [string]$Message)
+    if ($Quiet) { return }
+    Write-Host "$Color$Message$script:ColorReset"
+}
+
+# Check Administrator
+function Test-Administrator {
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($user)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if (-not $NoAdmin -and -not (Test-Administrator)) {
+    Write-ColorOutput -Color $script:ColorRed -Message "ERROR: Please run as Administrator"
+    Write-ColorOutput -Color $script:ColorYellow -Message "Right-click PowerShell and select 'Run as Administrator'"
+    exit 1
+}
+
+Write-ColorOutput -Color $script:ColorBlue -Message "========================================"
+Write-ColorOutput -Color $script:ColorGreen -Message "🐋 BIG-PHISH v1.0.0 Installer"
+Write-ColorOutput -Color $script:ColorBlue -Message "========================================"
+Write-Host ""
+
+# Check Python
+function Test-Python {
+    try {
+        $pyVersion = & python --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-ColorOutput -Color $script:ColorGreen -Message "[OK] $pyVersion"
+            return $true
+        }
+    } catch {
+        Write-ColorOutput -Color $script:ColorRed -Message "[ERROR] Python not found"
+        return $false
+    }
+}
+
+if (-not (Test-Python)) {
+    Write-ColorOutput -Color $script:ColorYellow -Message "Download Python from: https://www.python.org/downloads/"
+    Write-ColorOutput -Color $script:ColorYellow -Message "Make sure to check 'Add Python to PATH'"
+    exit 1
+}
+
+# Create virtual environment
+Write-ColorOutput -Color $script:ColorBlue -Message "[INFO] Creating virtual environment..."
+if (-not (Test-Path "venv")) {
+    python -m venv venv
+}
+
+# Activate virtual environment
+$venvPath = Join-Path $PWD "venv\Scripts\Activate.ps1"
+if (Test-Path $venvPath) {
+    & $venvPath
+}
+
+# Install dependencies
+Write-ColorOutput -Color $script:ColorBlue -Message "[INFO] Installing Python dependencies..."
+python -m pip install --upgrade pip setuptools wheel
+
+$requirements = @("requirements.txt", "requirements-full.txt")
+foreach ($req in $requirements) {
+    if (Test-Path $req) {
+        pip install -r $req
+    }
+}
+
+# Create directories
+Write-ColorOutput -Color $script:ColorBlue -Message "[INFO] Creating directories..."
+$directories = @(
+    ".bigphish", "reports", "logs", "config", "wordlists",
+    "phishing_templates", "captured_credentials", "ssh_keys",
+    "traffic_logs", "nikto_results"
+)
+
+foreach ($dir in $directories) {
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+}
+
+# Create configuration
+Write-ColorOutput -Color $script:ColorBlue -Message "[INFO] Setting up configuration..."
+$configPath = "config\config.json"
+if (-not (Test-Path $configPath)) {
+    $defaultConfig = @'
+{
+    "monitoring": {"enabled": true, "port_scan_threshold": 10},
+    "scanning": {"default_ports": "1-1000", "timeout": 30},
+    "security": {"auto_block": false, "log_level": "INFO"},
+    "nikto": {"enabled": true, "timeout": 300},
+    "traffic_generation": {"enabled": true, "max_duration": 300, "allow_floods": false},
+    "social_engineering": {"enabled": true, "default_port": 8080, "capture_credentials": true},
+    "crunch": {"enabled": true, "max_file_size_mb": 1024, "default_output_dir": "wordlists"},
+    "ssh": {"enabled": true, "default_timeout": 30, "max_connections": 5}
+}
+'@
+    Set-Content -Path $configPath -Value $defaultConfig
+}
+
+# Create run script
+Write-ColorOutput -Color $script:ColorBlue -Message "[INFO] Creating run scripts..."
+
+# PowerShell run script
+$psRunScript = @'
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $scriptDir
+& "venv\Scripts\Activate.ps1"
+python bigphish.py @args
+'@
+Set-Content -Path "run.ps1" -Value $psRunScript
+
+# Batch run script
+$batchRunScript = @'
+@echo off
+call venv\Scripts\activate.bat
+python bigphish.py %*
+'@
+Set-Content -Path "run.bat" -Value $batchRunScript
+
+# Create desktop shortcut
+if (-not $Quiet) {
+    $createShortcut = Read-Host "Create desktop shortcut? (y/n)"
+    if ($createShortcut -eq 'y') {
+        $WScriptShell = New-Object -ComObject WScript.Shell
+        $Shortcut = $WScriptShell.CreateShortcut("$env:USERPROFILE\Desktop\BigPhish.lnk")
+        $Shortcut.TargetPath = "$PWD\run.bat"
+        $Shortcut.WorkingDirectory = $PWD
+        $Shortcut.IconLocation = "$PWD\icon.ico"
+        $Shortcut.Save()
+        Write-ColorOutput -Color $script:ColorGreen -Message "[OK] Desktop shortcut created"
+    }
+}
+
+Write-ColorOutput -Color $script:ColorGreen -Message "========================================"
+Write-ColorOutput -Color $script:ColorGreen -Message "✅ BIG-PHISH Installation Complete!"
+Write-ColorOutput -Color $script:ColorGreen -Message "========================================"
+Write-ColorOutput -Color $script:ColorBlue -Message ""
+Write-ColorOutput -Color $script:ColorBlue -Message "Run with: .\run.bat  or  .\run.ps1"
+Write-ColorOutput -Color $script:ColorBlue -Message ""
+
+if (-not $Quiet) {
+    Read-Host "Press Enter to exit"
+}
